@@ -1,0 +1,162 @@
+---
+title: "Climate Change Project"
+author: "Micah Isser"
+date: "2024-03-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+Climate change is a massive area of study, with implications in ocean temperatures, carbon content, and weather patterns.  I will try to just look at some trends in global temperatures, to see how weather may have changed since the Industrial Revolution.  First, I'll load a data set from Berkley Earth (posted on Kaggle).
+
+```{r load-data, echo=TRUE, message=FALSE}
+file_path <- "/Users/micah.isser/Downloads/GlobalTemperatures.csv"
+global_temperatures <- read.csv(file_path)
+head(global_temperatures)
+summary(global_temperatures)
+```
+
+## Data Cleaning
+
+Now let's identify where there are NA values, whether there are duplicates, and whether there are extreme outliers.  To take these steps, let's load the libraries of tidyverse and janitor.
+
+```{r load-data, echo=TRUE, message=FALSE}
+install.packages("janitor")
+library(tidyverse)
+library(janitor)
+sum(is.na(global_temperatures))
+sapply(global_temperatures, function(x) sum(is.na(x))) 
+
+```
+So of the 3192 entries, there are 1200 for which there are several columns missing.
+I'm curious about the 12 entries for which there is NA for LandAverageTemperature is NA.  Are these rows entirely blank?
+
+```{r load-data, echo=TRUE, message=FALSE}
+na_rows <- which(is.na(global_temperatures$LandAverageTemperature))
+
+print(na_rows)
+
+global_temperatures[na_rows, ]
+```
+They are blank, so I'm going to remove those rows
+
+```{r load-data, echo=TRUE, message=FALSE}
+global_temperatures_clean <- global_temperatures[-na_rows, ]
+sum(is.na(global_temperatures_clean))
+sapply(global_temperatures_clean, function(x) sum(is.na(x))) 
+```
+So while there are still 1,188 rows that are missing some elements, there are none with NA for all values.  Now let's look for duplicates.
+
+```{r load-data, echo=TRUE, message=FALSE}
+duplicate_rows <- duplicated(global_temperatures)
+global_temperatures[duplicate_rows, ]
+```
+
+Great!  There are no duplicated rows.  Now let's look for outliers in the data - values that deviate so wildly from the median that they will skew the data, and are likely errors.  First let's define interquartile ranges for the ranges, then look for values that are more than 1.5 IQRs lower than the first quartile, or 1.5 IQRs higher than the third quartile.
+
+```{r load-data, echo=TRUE, message=FALSE}
+Q1 <- quantile(global_temperatures_clean$LandAverageTemperature, 0.25, na.rm = TRUE)
+Q3 <- quantile(global_temperatures_clean$LandAverageTemperature, 0.75, na.rm = TRUE)
+IQR <- Q3 - Q1
+
+lower_bound <- Q1 - 1.5 * IQR
+upper_bound <- Q3 + 1.5 * IQR
+
+outliers <- global_temperatures_clean$LandAverageTemperature < lower_bound | global_temperatures_clean$LandAverageTemperature > upper_bound
+
+print(global_temperatures[outliers, ])
+```
+
+It looks like there are no significant outliers, but let's graph to make sure:
+
+```{r load-data, echo=TRUE, message=FALSE}
+ggplot(global_temperatures_clean, aes(x = dt, y = LandAverageTemperature)) +
+  geom_point() +
+  theme_minimal() +
+  ggtitle("Scatter Plot of Land Average Temperature Over Time")
+```
+
+While there definitely is more variation in the temperature in earlier years, there do not seem to be any significant outliers.  
+
+## Data Analysis and Graphing
+
+It is also seems now that there there is an upward trend in the data, and also that the data falls into particular 'bands'.  Let's try to find how the data changes through a line of best fit, by using a linear regression.  For this, I'll use the ggplot library in R.
+
+```{r load-data, echo=TRUE, message=TRUE}
+global_temperatures_clean$dt <- as.Date(global_temperatures_clean$dt)
+
+global_temperatures_clean$Year <- as.numeric(format(global_temperatures_clean$dt, "%Y"))
+
+model <- lm(LandAverageTemperature ~ Year, data = global_temperatures_clean)
+
+library(ggplot2)
+ggplot(global_temperatures_clean, aes(x = Year, y = LandAverageTemperature)) +
+  geom_point() +  
+  geom_smooth(method = "lm", col = "blue") + 
+  theme_minimal() +
+  labs(title = "Land Average Temperature Over Time",
+       x = "Year", y = "Land Average Temperature")
+```
+How steep is the slope of this line?  Or in other words, on average, how quickly has the temperature been getting hotter since 1700?
+
+```{r load-data, echo=TRUE, message=TRUE}
+slope <- coef(model)["Year"]
+print(slope)
+```
+Interesting - so according to this graph, for each one-year increase, the average land temperature is predicted to increase by about 0.0047 degrees Celsius.  Yet, I would guess that the rate at which the Earth is warming is speeding up as time goes on.  I wonder if the parabolic curve of a quadratic function would more effectively predict the rate of temperature change.
+
+```{r load-data, echo=TRUE, message=TRUE}
+model_poly <- lm(LandAverageTemperature ~ poly(Year, 2, raw=TRUE), data = global_temperatures_clean)
+
+global_temperatures_clean$predicted_temp <- predict(model_poly, global_temperatures_clean)
+
+ggplot(global_temperatures_clean, aes(x = Year, y = LandAverageTemperature)) +
+  geom_point() +  
+  geom_line(aes(y = predicted_temp), color = "blue") +  
+  theme_minimal() +
+  labs(title = "Land Average Temperature Over Time with Polynomial Fit",
+       x = "Year", y = "Land Average Temperature")
+```
+This looks slightly better than the linear function.  But where one number - the slope - can accurately express the trajectory of a line - we'll need three numbers to express the quadratic function.  If we think of a quadratic equation as A + Bx + Cx^2, the coefficients will be A, B, and C.  
+
+```{r load-data, echo=TRUE, message=TRUE}
+coeffs <- coef(model_poly)
+print(coeffs)
+```
+So according to this model, the equation to calculate land temperature would be
+LandAverageTemperature = 155.1258 − (0.1608079 x Year) + (0.00004393875 × Year^2) 
+
+I am curious about how the slope of the graph changes - how is global warming accelerating over time?  Let's look at the derivative of this quadratic function to find the instantaneous slope in different years. 
+
+```{r load-data, echo=TRUE, message=TRUE}
+beta_0 <- coeffs[1]  
+beta_1 <- coeffs[2]  
+beta_2 <- coeffs[3]  
+
+slope_function <- function(year) {
+  beta_1 + 2 * beta_2 * year
+}
+
+years <- seq(from = min(global_temperatures_clean$Year), to = max(global_temperatures_clean$Year), by = 1)
+
+slopes <- sapply(years, slope_function)
+
+interval_years <- seq(from = min(global_temperatures_clean$Year), to = max(global_temperatures_clean$Year), by = 50)
+
+interval_slopes <- sapply(interval_years, slope_function)
+
+plot(years, slopes, type = 'l', col = 'blue', xlab = 'Year', ylab = 'Rate of Change of Temperature',
+     main = 'Rate of Change of Land Average Temperature Over Time')
+
+labels <- paste(interval_years, "\n", round(interval_slopes, 5), sep="")
+
+text(interval_years, interval_slopes, labels = labels, pos = 3, cex = 0.7, offset = 0.5) 
+
+```
+
+This graph does a good job of showing how climate change is speeding up.  According to this model, the average temperature difference from one year to the next was -.007 in 1750 - slightly negative, although fairly close to zero.  By 2000, the global land temperature is rising at a rate of roughly .015 degrees per year.
+
